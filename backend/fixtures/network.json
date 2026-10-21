@@ -1,0 +1,16 @@
+{
+  "engine": {"available": true, "server_version": "fixture"},
+  "containers": [
+    {"service": "api", "state": "running", "health": "unhealthy", "restarts": 0},
+    {"service": "db", "state": "running", "health": "healthy", "restarts": 0},
+    {"service": "web", "state": "running", "health": "healthy", "restarts": 0}
+  ],
+  "inspect": {
+    "api": {"oom_killed": false, "exit_code": 0, "networks": ["demo_front"]},
+    "db": {"oom_killed": false, "exit_code": 0, "networks": ["demo_back"]},
+    "web": {"oom_killed": false, "exit_code": 0, "networks": ["demo_front"]}
+  },
+  "logs": {"api": "DNS name resolution failed for db:5432", "web": "DNS name resolution failed for db:5432"},
+  "stats": {"api": {"memory_percent": 15}, "web": {"memory_percent": 5}},
+  "compose": {"valid": true, "services": ["api", "db", "web"], "healthchecks": ["api", "db"], "depends_on": {"api": {"db": {"condition": "service_healthy"}}}, "ports": {"api": [8000], "db": [5432], "web": [8080]}}
+}

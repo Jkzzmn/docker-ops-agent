@@ -1,0 +1,104 @@
+{
+  "engine": {
+    "available": true,
+    "server_version": "27.3.1",
+    "containers_running": 2,
+    "containers_stopped": 1
+  },
+  "containers": [
+    {
+      "service": "api",
+      "name": "demo-api-1",
+      "state": "exited",
+      "health": "",
+      "restarts": 0,
+      "image": "demo-api:1.4.2"
+    },
+    {
+      "service": "db",
+      "name": "demo-db-1",
+      "state": "running",
+      "health": "healthy",
+      "restarts": 0,
+      "image": "postgres:16"
+    },
+    {
+      "service": "web",
+      "name": "demo-web-1",
+      "state": "running",
+      "health": "healthy",
+      "restarts": 0,
+      "image": "nginx:1.27"
+    }
+  ],
+  "logs": {
+    "api": "2026-10-20T09:11:42Z worker memory 251MiB exceeds limit 256MiB\n2026-10-20T09:11:43Z process exited code=137 OOMKilled=true"
+  },
+  "stats": {},
+  "events": {
+    "api": [
+      {
+        "action": "oom",
+        "time": 1792487503
+      }
+    ]
+  },
+  "inspect": {
+    "api": {
+      "oom_killed": true,
+      "exit_code": 137,
+      "restart_policy": "no",
+      "health": "",
+      "networks": [
+        "demo_default"
+      ],
+      "mounts": [],
+      "state": "exited"
+    },
+    "db": {
+      "oom_killed": false,
+      "exit_code": 0,
+      "networks": [
+        "demo_default"
+      ]
+    },
+    "web": {
+      "oom_killed": false,
+      "exit_code": 0,
+      "networks": [
+        "demo_default"
+      ]
+    }
+  },
+  "compose": {
+    "valid": true,
+    "services": [
+      "api",
+      "db",
+      "web"
+    ],
+    "healthchecks": [
+      "api",
+      "db"
+    ],
+    "depends_on": {
+      "api": {
+        "db": {
+          "condition": "service_healthy"
+        }
+      }
+    },
+    "ports": {
+      "api": [
+        8000
+      ],
+      "db": [
+        5432
+      ],
+      "web": [
+        8080
+      ]
+    },
+    "warnings": []
+  }
+}

@@ -1,0 +1,10 @@
+services:
+  db:
+    networks: [back]
+  api:
+    networks: [front]
+  web:
+    networks: [front]
+networks:
+  front: {}
+  back: {}

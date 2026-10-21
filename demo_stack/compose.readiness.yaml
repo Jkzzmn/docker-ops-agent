@@ -1,0 +1,12 @@
+services:
+  db:
+    environment:
+      DB_READY_DELAY: "120"
+    healthcheck:
+      disable: true
+  api:
+    environment:
+      REQUIRE_DB_AT_BOOT: "1"
+    depends_on:
+      db:
+        condition: service_started

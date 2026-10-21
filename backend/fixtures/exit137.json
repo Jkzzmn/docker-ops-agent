@@ -1,0 +1,14 @@
+{
+  "engine": {"available": true, "server_version": "fixture"},
+  "containers": [
+    {"service": "api", "state": "exited", "health": "unhealthy", "restarts": 0},
+    {"service": "db", "state": "running", "health": "healthy", "restarts": 0}
+  ],
+  "inspect": {
+    "api": {"oom_killed": false, "exit_code": 137, "networks": ["demo_default"]},
+    "db": {"oom_killed": false, "exit_code": 0, "networks": ["demo_default"]}
+  },
+  "logs": {"api": "Received SIGKILL; external stop reason unknown"},
+  "stats": {"api": {"memory_percent": 10}},
+  "compose": {"valid": true, "services": ["api", "db"], "healthchecks": ["api", "db"], "depends_on": {"api": {"db": {"condition": "service_healthy"}}}, "ports": {"api": [8000], "db": [5432]}}
+}

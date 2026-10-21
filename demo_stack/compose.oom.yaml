@@ -1,0 +1,5 @@
+services:
+  api:
+    restart: "no"
+    environment:
+      INJECT_OOM: "1"

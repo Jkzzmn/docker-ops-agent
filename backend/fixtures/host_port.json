@@ -1,0 +1,113 @@
+{
+  "engine": {
+    "available": true,
+    "server_version": "fixture"
+  },
+  "containers": [
+    {
+      "service": "api",
+      "state": "running",
+      "health": "unhealthy",
+      "restarts": 0
+    },
+    {
+      "service": "db",
+      "state": "running",
+      "health": "healthy",
+      "restarts": 0
+    },
+    {
+      "service": "web",
+      "state": "running",
+      "health": "healthy",
+      "restarts": 0
+    }
+  ],
+  "inspect": {
+    "api": {
+      "oom_killed": false,
+      "exit_code": 0,
+      "networks": [
+        "demo_default"
+      ]
+    },
+    "db": {
+      "oom_killed": false,
+      "exit_code": 0,
+      "networks": [
+        "demo_default"
+      ]
+    },
+    "web": {
+      "oom_killed": false,
+      "exit_code": 0,
+      "networks": [
+        "demo_default"
+      ]
+    }
+  },
+  "logs": {
+    "api": "2026-10-20T09:31:02Z connect to db:15432 failed: Connection refused"
+  },
+  "stats": {
+    "api": {
+      "memory_percent": 15
+    },
+    "web": {
+      "memory_percent": 5
+    }
+  },
+  "compose": {
+    "valid": true,
+    "services": [
+      "api",
+      "db",
+      "web"
+    ],
+    "healthchecks": [
+      "api",
+      "db"
+    ],
+    "depends_on": {
+      "api": {
+        "db": {
+          "condition": "service_healthy"
+        }
+      }
+    },
+    "ports": {
+      "api": [
+        8000
+      ],
+      "db": [
+        5432
+      ],
+      "web": [
+        8080
+      ]
+    },
+    "published": {
+      "api": [],
+      "db": [
+        {
+          "target": 5432,
+          "published": 15432
+        }
+      ],
+      "web": []
+    },
+    "warnings": []
+  },
+  "tcp": {
+    "api->db:5432": true
+  },
+  "listeners": {
+    "db": [
+      {
+        "address": "0.0.0.0",
+        "port": 5432,
+        "loopback": false
+      }
+    ]
+  }
+}

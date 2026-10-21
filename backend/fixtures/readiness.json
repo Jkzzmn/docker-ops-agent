@@ -1,0 +1,16 @@
+{
+  "engine": {"available": true, "server_version": "fixture"},
+  "containers": [
+    {"service": "api", "state": "restarting", "health": "unhealthy", "restarts": 5},
+    {"service": "db", "state": "running", "health": "", "restarts": 0},
+    {"service": "web", "state": "running", "health": "healthy", "restarts": 0}
+  ],
+  "inspect": {
+    "api": {"oom_killed": false, "exit_code": 1, "networks": ["demo_default"]},
+    "db": {"oom_killed": false, "exit_code": 0, "networks": ["demo_default"]},
+    "web": {"oom_killed": false, "exit_code": 0, "networks": ["demo_default"]}
+  },
+  "logs": {"api": "database connection refused: db:5432; dependency not ready"},
+  "stats": {"api": {"memory_percent": 15}, "web": {"memory_percent": 5}},
+  "compose": {"valid": true, "services": ["api", "db", "web"], "healthchecks": ["api"], "depends_on": {"api": {"db": {"condition": "service_started"}}}, "ports": {"api": [8000], "db": [5432], "web": [8080]}}
+}

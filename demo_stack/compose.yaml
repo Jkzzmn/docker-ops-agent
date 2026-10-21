@@ -1,0 +1,38 @@
+name: docker-ops-demo
+services:
+  db:
+    build: .
+    environment:
+      ROLE: db
+    expose: ["5432"]
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import socket; socket.create_connection(('127.0.0.1',5432),1).close()"]
+      interval: 2s
+      timeout: 2s
+      retries: 3
+  api:
+    build: .
+    restart: unless-stopped
+    mem_limit: 128m
+    memswap_limit: 128m
+    depends_on:
+      db:
+        condition: service_healthy
+    expose: ["8000"]
+    ports: ["127.0.0.1:${DEMO_API_PORT:-18000}:8000"]
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health',timeout=1)"]
+      interval: 2s
+      timeout: 2s
+      retries: 3
+  web:
+    build: .
+    environment:
+      ROLE: web
+      PORT: "8080"
+    expose: ["8080"]
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/health',timeout=1)"]
+      interval: 2s
+      timeout: 2s
+      retries: 3
