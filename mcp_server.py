@@ -3,8 +3,15 @@ from __future__ import annotations
 from fastmcp import FastMCP
 from backend import docker_tools
 from backend import config_control
+from backend.runtime_actions import preview_runtime_action, execute_runtime_action
+from backend.inventory import inspect_project_configuration
+from backend.port_owners import inspect_port_owners
 
 mcp = FastMCP(name="docker-ops-safe-control-plane")
+mcp.tool()(preview_runtime_action)
+mcp.tool()(execute_runtime_action)
+mcp.tool()(inspect_project_configuration)
+mcp.tool()(inspect_port_owners)
 
 for tool_name in (
     "get_docker_engine_status", "list_containers", "inspect_container", "get_container_logs",

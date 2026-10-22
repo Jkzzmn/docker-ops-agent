@@ -45,7 +45,7 @@ class DockerMCPClient:
         if self.stack: await self.stack.aclose()
 
     async def tool(self, name: str, args: dict, attempts: int = 3) -> tuple[dict, int]:
-        if name in {"restart_service", "apply_project_config_patch", "deploy_project_config"}:
+        if name in {"restart_service", "apply_project_config_patch", "deploy_project_config", "execute_runtime_action"}:
             with span("mcp." + name, "tool"):
                 return await self._tool(name, args, attempts=1)
         async with self.read_slots:
@@ -54,7 +54,7 @@ class DockerMCPClient:
 
     async def _tool(self, name: str, args: dict, attempts: int = 3) -> tuple[dict, int]:
         assert self.session
-        if name in {"restart_service", "apply_project_config_patch", "deploy_project_config"}:
+        if name in {"restart_service", "apply_project_config_patch", "deploy_project_config", "execute_runtime_action"}:
             attempts = 1  # A timeout cannot prove whether a mutation already ran.
         for n in range(attempts):
             try:

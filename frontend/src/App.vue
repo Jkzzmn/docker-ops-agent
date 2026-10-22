@@ -3,6 +3,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref } from 'v
 import { applyTraceEvent } from './trace.js'
 import { consumeSse } from './sse.js'
 import { responseStatus } from './responseStatus.js'
+import { nodeTitle, causeTitle, isSubmitKey, nearBottom } from './presentation.js'
 import TraceRail from './components/TraceRail.vue'
 import DecisionPanel from './components/DecisionPanel.vue'
 import ClarificationPanel from './components/ClarificationPanel.vue'
@@ -20,6 +21,7 @@ const actionBusy = ref(false), targetNotice = ref('')
 const selectingTarget = ref(false)
 const retryOriginal = ref('')
 const logEl = ref(null)
+const following = ref(true)
 const threadId = localStorage.getItem('docker-ops-thread') || `docker-${crypto.randomUUID()}`
 localStorage.setItem('docker-ops-thread', threadId)
 let source = null
@@ -53,21 +55,25 @@ const starters = computed(() => {
   const a = primaryService.value || 'api', b = peerService.value || 'db'
   return {
     live: [
-      { cmd: `/diagnose-oom ${a}`, why: `${a}가 메모리 부족으로 종료됐는지 정해진 절차로 진단합니다` },
-      { cmd: `/diagnose-network ${a} ${b}`, why: `${a}에서 ${b}로 가는 DNS·포트·바인딩을 차례로 확인합니다` },
-      { cmd: `${a} 상태만 알려주세요`, why: '원인 분석 없이 현재 상태 한 번만 조회합니다' },
-      { cmd: '현재 프로젝트의 Dockerfile과 도커 컴포즈 실제 파일을 읽고 설정 문제를 검토해주세요. 파일 변경은 하지 마세요.', why: '활성 설정 파일과 실제 배포 상태를 대조합니다' }
+      { title: '컨테이너 상태', icon: '01', cmd: `${a} 상태만 알려주세요`, why: `${a}의 현재 상태만 빠르게 확인` },
+      { title: '설정 파일 검토', icon: '02', cmd: '현재 프로젝트의 Dockerfile과 도커 컴포즈 실제 파일을 읽고 설정 문제를 검토해주세요. 파일 변경은 하지 마세요.', why: 'Compose·Dockerfile의 오류와 개선점' },
+      { title: '네트워크 점검', icon: '03', cmd: `/diagnose-network ${a} ${b}`, why: `${a} → ${b} 연결을 순서대로 확인` },
+      { title: '메모리 문제 진단', icon: '04', cmd: `/diagnose-oom ${a}`, why: `${a}가 메모리 부족으로 종료됐는지 확인` }
     ],
     learn: [
-      { cmd: '도커 컨테이너에 저장된 내용이 모두 사라졌어요', why: '실제 환경은 건드리지 않고 원리와 확인 순서를 알려줍니다' },
-      { cmd: '볼륨과 바인드 마운트의 차이를 설명해주세요', why: '검토된 교육 자료에서 출처와 함께 설명합니다' }
+      { title: '컨테이너 데이터는 어디로?', icon: '↳', cmd: '도커 컨테이너에 저장된 내용이 모두 사라졌어요', why: '데이터 수명과 보존 원리 배우기' },
+      { title: '볼륨 vs 바인드 마운트', icon: '↳', cmd: '볼륨과 바인드 마운트의 차이를 설명해주세요', why: '검토된 자료로 차이 이해하기' }
     ]
   }
 })
-const stateLabel = responseStatus
+const stateLabel = turn => sending.value && turn === turns.value.at(-1) && !turn.nodes.length ? '연결 중 · 첫 실행 대기' : responseStatus(turn)
 const stateClass = turn => turn.nodes.some(n => n.status === 'running') ? 'running' : (turn.metadata ? '' : 'stopped')
 
-function scroll() { nextTick(() => logEl.value?.scrollTo({ top: logEl.value.scrollHeight })) }
+function scroll() { nextTick(() => { if (following.value) logEl.value?.scrollTo({ top: logEl.value.scrollHeight }) }) }
+function followLatest() { following.value = true; scroll() }
+function onComposerKeydown(event) {
+  if (isSubmitKey(event)) { event.preventDefault(); submit() }
+}
 function stop() {
   source?.close(); source = null; sending.value = false
   replyController?.abort(); replyController = null
@@ -129,6 +135,7 @@ function addEvent(turn, event) {
 
 function createTurn(text) {
   const turn = reactive({ id: crypto.randomUUID(), question: text, answer: '', events: [], nodes: [], attempt: 0, clarification: null, approval: null, proposal: null, actionResult: null, actionHistory: [], answerHtml: '', prompt: null, metadata: null, evidence: [], knowledge: [], diagnosis: null, error: null, rewritten: false })
+  following.value = true
   turns.value.push(turn); scroll()
   return turn
 }
@@ -186,12 +193,13 @@ async function decide(turn, approve) {
     const data = await r.json()
     if (!r.ok) throw new Error(typeof data.detail === 'object' ? data.detail.message : data.detail || 'request failed')
     turn.approval.status = data.status; turn.events.push({ ...data, node: 'verify' }); turn.actionResult = data
+    if (data.type === 'RuntimeAction' && turn.metadata) turn.metadata.execution_status = data.status === 'executed' ? 'completed' : 'failed'
     if (data.next_approval) {
       turn.actionHistory.push(data)
       turn.approval = data.next_approval
       turn.actionResult = null
     }
-  } catch (e) { turn.error = e.message } finally { turn.approval.busy = false; actionBusy.value = false; scroll() }
+  } catch (e) { turn.error = e.message; turn.approval.status = 'unknown'; if (turn.metadata) turn.metadata.execution_status = 'failed' } finally { turn.approval.busy = false; actionBusy.value = false; scroll() }
 }
 
 function details(e) {
@@ -222,11 +230,11 @@ const nodeStatus = status => ({ running: '실행 중', completed: '완료', fail
     <header class="topbar">
       <div class="brand">
         <span class="mark" aria-hidden="true"></span>
-        <div><h1>Docker Ops Agent</h1><p>로컬 Compose 장애를 관측한 사실로 진단합니다</p></div>
+        <div><h1>Docker Ops <span>Agent</span></h1><p>관측한 사실로, 더 명확하게</p></div>
       </div>
       <div class="status" role="status">
         <span class="pulse" :class="{ on: health?.ok }" aria-hidden="true"></span>
-        <span class="models">{{ backendLabel }}</span>
+        <details class="connection"><summary>{{ health?.ok ? '서버 연결됨' : '연결 확인 중' }}</summary><p>{{ backendLabel }}</p></details>
         <span v-if="health" class="badge" :class="{ sim: health.docker_mode !== 'live' }">{{ health.docker_mode === 'live' ? '실제 Docker' : '시뮬레이션' }}</span>
       </div>
     </header>
@@ -236,37 +244,52 @@ const nodeStatus = status => ({ running: '실행 중', completed: '완료', fail
 
       <main class="stage">
         <p v-if="health?.docker_target" class="target-note" :class="{ warn: health.docker_target.warning }">
-          서버의 Docker <b>{{ health.docker_target.context }}</b> · 프로젝트 <b>{{ health.docker_target.project }}</b>를 조회합니다. 브라우저를 연 PC의 Docker는 조회하지 않습니다.<template v-if="health.docker_target.warning"> {{ health.docker_target.warning }}</template>
+          <span class="target-caption">현재 진단 대상</span><b>{{ health.docker_target.project }}</b><span class="target-context">{{ health.docker_target.context }} · 서비스 {{ services.length }}개</span><span class="target-scope">백엔드 서버의 Docker 기준</span><template v-if="health.docker_target.warning"><span class="target-warning">{{ health.docker_target.warning }}</span></template>
         </p>
 
-        <div class="feed" ref="logEl">
+        <div class="feed" ref="logEl" @scroll="following = nearBottom($event.target)">
           <div id="target-selection"><TargetPanel v-if="health?.docker_mode === 'live'" :api="API" :identity="health.instance_id" :selected="health.target_selected" :disabled="sending || actionBusy || health.target_switching" @selected="targetSelected" @switching="value => selectingTarget = value" /></div>
           <p v-if="targetNotice" class="target-note" role="status">{{ targetNotice }}</p>
           <button v-if="retryOriginal" type="button" class="btn" @click="prepareRetry">원래 질문 불러오기 (전송 전 확인)</button>
           <section v-if="!turns.length" class="start">
-            <h2>추측하기 전에 컨테이너 상태부터 확인합니다</h2>
-            <p>상태·로그·Compose·Dockerfile을 실제로 읽어 점검합니다. 변경이 필요하면 정확한 diff를 먼저 보여주고, 파일 변경과 빌드·재생성은 각각 승인받습니다.</p>
+            <p class="eyebrow">YOUR DOCKER WORKSPACE</p>
+            <h2>무엇을 확인할까요?</h2>
+            <p>컨테이너 상태부터 설정 파일까지.<br>필요한 것만 살펴보고, 확인한 근거와 함께 알려드려요.</p>
+            <h3 class="starter-heading">실제 환경 점검 <span>읽기 전용으로 시작합니다</span></h3>
             <ul class="starters">
-              <li class="group">실제 환경 진단</li>
-              <li v-for="item in starters.live" :key="item.cmd"><button type="button" @click="useStarter(item.cmd)"><span class="cmd">{{ item.cmd }}</span><span class="why">{{ item.why }}</span></button></li>
-              <li class="group">개념 배우기</li>
-              <li v-for="item in starters.learn" :key="item.cmd"><button type="button" @click="useStarter(item.cmd)"><span class="cmd" style="font-family: var(--font); font-weight: 600">{{ item.cmd }}</span><span class="why">{{ item.why }}</span></button></li>
+              <li v-for="item in starters.live" :key="item.cmd"><button type="button" :disabled="!health?.target_selected || selectingTarget" :title="item.cmd" @click="useStarter(item.cmd)"><span class="starter-icon" aria-hidden="true">{{ item.icon }}</span><span class="starter-copy"><span class="cmd">{{ item.title }}</span><span class="why">{{ item.why }}</span></span><span class="starter-arrow" aria-hidden="true">↗</span></button></li>
             </ul>
+            <h3 class="starter-heading">개념부터 차근차근 <span>실제 환경을 조회하지 않아요</span></h3>
+            <ul class="starters learn">
+              <li v-for="item in starters.learn" :key="item.cmd"><button type="button" :disabled="!health?.target_selected || selectingTarget" :title="item.cmd" @click="useStarter(item.cmd)"><span class="starter-icon" aria-hidden="true">{{ item.icon }}</span><span class="starter-copy"><span class="cmd">{{ item.title }}</span><span class="why">{{ item.why }}</span></span><span class="starter-arrow" aria-hidden="true">↗</span></button></li>
+            </ul>
+            <p class="start-safety">파일 변경과 빌드·재생성은 내용을 보여드린 뒤 각각 승인받습니다.</p>
           </section>
 
           <article v-for="turn in turns" :key="turn.id" class="turn">
             <p class="ask">{{ turn.question }}</p>
 
+            <div v-if="turn.answer" class="answer" :class="{ education: turn.metadata?.route === 'education' }">
+              <div class="answer-head"><span>{{ turn.metadata?.route === 'runtime' ? (turn.approval ? '실행 승인 준비' : '실행 요청 확인') : turn.metadata?.route === 'inventory' ? '현재 구성 조회' : turn.metadata?.route === 'education' ? '학습 안내' : '점검 결과' }}</span><span v-if="turn.rewritten" class="tag">검증 뒤 다시 작성됨</span><span v-else class="answer-origin">Docker Ops Agent</span></div>
+              <AnswerHtml v-if="turn.answerHtml" :html="turn.answerHtml" />
+              <AnswerText v-else :text="turn.answer" />
+              <p v-if="turn.metadata" class="summary-line">{{ stateLabel(turn) }}<template v-if="turn.metadata.config_metrics"> · 설정 수집 {{ turn.metadata.config_metrics.files_collected }}/{{ turn.metadata.config_metrics.files_requested }} · 지원 주장 {{ turn.metadata.config_metrics.claims_supported }}건</template><template v-if="turn.metadata.retrieval_method"> · 검색 {{ turn.metadata.retrieval_method }}</template></p>
+              <a v-if="turn.metadata?.target_selection_required" href="#target-selection">프로젝트 선택 패널로 이동</a>
+              <dl v-if="turn.diagnosis" class="result-metrics"><div><dt>관측 판단</dt><dd :title="turn.diagnosis.cause">{{ causeTitle(turn.diagnosis.cause) }}</dd></div><div><dt>근거 충족</dt><dd>{{ turn.metadata?.evidence_coverage == null ? '미측정' : `${Math.round(turn.metadata.evidence_coverage * 100)}%` }}</dd></div><div><dt>도구 호출</dt><dd>{{ turn.metadata?.tool_calls ?? 0 }}회</dd></div><div v-if="turn.metadata?.llm_usage?.total_tokens != null"><dt>사용 토큰</dt><dd>{{ turn.metadata.llm_usage.total_tokens.toLocaleString() }}</dd></div></dl>
+              <p v-if="turn.metadata?.execution_budget?.stop_reason" class="hint">실행 한도에 도달해 추가 호출을 중단했습니다. 확인된 관측만 표시하며 변경은 수행하지 않았습니다.</p>
+            </div>
+
+            <ProposalPanel :proposal="turn.proposal" />
+            <ClarificationPanel :question="turn.clarification" :disabled="sending" @reply="response => replyToQuestion(turn, response)" @cancel="cancelQuestion(turn)" />
+            <p v-for="action in turn.actionHistory" :key="action.action_id" class="note">1차 파일 변경·Compose 구문 검증 완료. 컨테이너는 아직 변경하지 않았습니다. 2차 승인을 거절하거나 만료되면 파일 변경은 유지되며 자동 배포되지 않습니다.</p>
+            <DecisionPanel :approval="turn.approval" :result="turn.actionResult" @decide="ok => decide(turn, ok)" />
+
             <details class="trace" :open="sending && turn === turns.at(-1)">
-              <summary><span>{{ turn.restored ? '대기 질문 복원 · 이전 실행 기록 없음' : `실제 실행된 단계 ${turn.nodes.length}개` }}</span><span class="state" :class="stateClass(turn)">{{ stateLabel(turn) }}</span></summary>
+              <summary><span>{{ turn.restored ? '복원된 확인 질문' : `실제 실행 단계 · ${turn.nodes.length}개` }}</span><span class="state" :class="stateClass(turn)">{{ stateLabel(turn) }}</span></summary>
               <p v-if="!turn.nodes.length" class="wait">{{ turn.restored ? '저장된 질문만 복원했습니다. 답변 후 새 실행의 실제 이벤트를 표시합니다.' : '첫 실행 이벤트를 기다리는 중입니다.' }}</p>
               <div class="trace-body">
                 <details v-for="node in turn.nodes" :key="node.run_id" class="node-row" :class="[node.status, { child: node.parent_run_id }]" :data-node="`${node.scope}.${node.node}`" :data-status="node.status">
-                  <summary>
-                    <span class="dot" aria-hidden="true"></span>
-                    <span class="name">{{ node.scope }}.{{ node.node }}</span>
-                    <span class="time num">{{ nodeStatus(node.status) }}<template v-if="node.elapsed_ms != null"> · {{ ms(node.elapsed_ms) }}</template></span>
-                  </summary>
+                  <summary><span class="dot" aria-hidden="true"></span><span class="name">{{ nodeTitle(node) }}<small>{{ node.scope }}.{{ node.node }}</small></span><span class="time num">{{ nodeStatus(node.status) }}<template v-if="node.elapsed_ms != null"> · {{ ms(node.elapsed_ms) }}</template></span></summary>
                   <div class="io">
                     <p class="mono">run {{ node.run_id }} · parent {{ node.parent_run_id || 'root' }}</p>
                     <pre class="data">입력 {{ JSON.stringify(node.input, null, 2) }}</pre>
@@ -276,21 +299,6 @@ const nodeStatus = status => ({ running: '실행 중', completed: '완료', fail
                 </details>
               </div>
             </details>
-
-            <div v-if="turn.answer" class="answer" :class="{ education: turn.metadata?.route === 'education' }">
-              <div class="answer-head"><span>{{ turn.metadata?.route === 'education' ? '학습 안내' : '답변' }}</span><span v-if="turn.rewritten" class="tag">검증 뒤 다시 작성됨</span></div>
-              <AnswerHtml v-if="turn.answerHtml" :html="turn.answerHtml" />
-              <AnswerText v-else :text="turn.answer" />
-              <p v-if="turn.metadata" class="summary-line">{{ stateLabel(turn) }}<template v-if="turn.metadata.config_metrics"> · 설정 수집 {{ turn.metadata.config_metrics.files_collected }}/{{ turn.metadata.config_metrics.files_requested }} · 지원 주장 {{ turn.metadata.config_metrics.claims_supported }}건</template><template v-if="turn.metadata.retrieval_method"> · 검색 {{ turn.metadata.retrieval_method }}</template></p>
-              <a v-if="turn.metadata?.target_selection_required" href="#target-selection">프로젝트 선택 패널로 이동</a>
-              <p v-if="turn.diagnosis" class="summary-line">판단 <b>{{ turn.diagnosis.cause }}</b> · 근거 충족 <b class="num">{{ turn.metadata?.evidence_coverage == null ? '미측정' : `${Math.round(turn.metadata.evidence_coverage * 100)}%` }}</b> · 도구 호출 <b class="num">{{ turn.metadata?.tool_calls ?? 0 }}회</b><template v-if="turn.metadata?.llm_usage?.total_tokens != null"> · 토큰 <b class="num">{{ turn.metadata.llm_usage.total_tokens.toLocaleString() }}</b></template></p>
-              <p v-if="turn.metadata?.execution_budget?.stop_reason" class="hint">실행 한도에 도달해 추가 호출을 중단했습니다. 확인된 관측만 표시하며 변경은 수행하지 않았습니다.</p>
-            </div>
-
-            <ProposalPanel :proposal="turn.proposal" />
-            <ClarificationPanel :question="turn.clarification" :disabled="sending" @reply="response => replyToQuestion(turn, response)" @cancel="cancelQuestion(turn)" />
-            <p v-for="action in turn.actionHistory" :key="action.action_id" class="note">1차 파일 변경·Compose 구문 검증 완료. 컨테이너는 아직 변경하지 않았습니다. 2차 승인을 거절하거나 만료되면 파일 변경은 유지되며 자동 배포되지 않습니다.</p>
-            <DecisionPanel :approval="turn.approval" :result="turn.actionResult" @decide="ok => decide(turn, ok)" />
 
             <details class="fold"><summary>업무 이벤트 {{ turn.events.length }}개</summary><div class="body"><p v-for="(e, i) in turn.events" :key="i">{{ labels[e.type] || e.type }} · {{ details(e) }}</p></div></details>
             <details v-if="turn.evidence.length" class="fold"><summary>수집한 관측 근거 {{ turn.evidence.length }}개</summary><div class="body"><template v-for="item in turn.evidence" :key="item.id"><p class="mono">{{ item.id }} · {{ item.tool }}<template v-if="item.elapsed_ms != null"> · {{ ms(item.elapsed_ms) }}</template></p><pre class="data">{{ JSON.stringify(item.observation, null, 2) }}</pre></template></div></details>
@@ -302,11 +310,18 @@ const nodeStatus = status => ({ running: '실행 중', completed: '완료', fail
           </article>
         </div>
 
-        <form class="composer" @submit.prevent="submit">
-          <textarea v-model="message" @keydown.enter.exact.prevent="submit" :disabled="sending || selectingTarget || !!waitingTurn || !health?.target_selected" maxlength="4000" aria-label="Docker 교육 또는 진단 질문" :placeholder="!health?.target_selected ? '먼저 프로젝트를 선택해주세요' : waitingTurn ? '위의 추가 확인 카드에 답변하거나 취소한 뒤 새 질문을 보내세요' : '증상을 적거나 /diagnose-oom, /diagnose-network 명령을 입력하세요'"></textarea>
-          <button v-if="sending" type="button" class="btn stop" @click="stop">중지</button>
-          <button v-else type="submit" class="btn send" :disabled="selectingTarget || !message.trim() || !!waitingTurn || !health?.target_selected">질문하기</button>
-        </form>
+        <div class="composer-dock">
+          <button v-if="!following && turns.length" type="button" class="jump-latest" @click="followLatest">↓ 최신 답변 보기</button>
+          <form class="composer" @submit.prevent="submit">
+            <div class="composer-box">
+              <label class="sr-only" for="docker-question">Docker 교육 또는 진단 질문</label>
+              <textarea id="docker-question" v-model="message" rows="2" @keydown="onComposerKeydown" :disabled="sending || selectingTarget || !!waitingTurn || !health?.target_selected" maxlength="4000" aria-describedby="composer-help" :placeholder="!health?.target_selected ? '먼저 위에서 프로젝트를 선택해주세요' : waitingTurn ? '추가 확인 카드에 답변하거나 요청을 취소해주세요' : '증상이나 확인할 내용을 적어주세요.'"></textarea>
+              <button v-if="sending" type="button" class="btn stop" @click="stop">수신 중지</button>
+              <button v-else type="submit" class="btn send" :disabled="selectingTarget || !message.trim() || !!waitingTurn || !health?.target_selected">질문하기 <span aria-hidden="true">↑</span></button>
+            </div>
+            <div class="composer-footer"><p id="composer-help"><template v-if="sending">실제 실행 과정을 받아오는 중입니다. 수신 중지는 서버 작업 취소를 보장하지 않습니다.</template><template v-else>Enter로 전송 <span>· Shift + Enter로 줄바꿈</span></template></p><span v-if="message.length" class="character-count">{{ message.length.toLocaleString() }} / 4,000</span><span v-else class="composer-safety">변경 전에는 반드시 승인</span></div>
+          </form>
+        </div>
       </main>
     </div>
   </div>

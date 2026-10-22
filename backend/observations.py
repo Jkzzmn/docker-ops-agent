@@ -34,8 +34,13 @@ def status_answer(item):
     elif subject == "ambiguous":
         text = f"{service}: 대응 컨테이너가 여러 개여서 단일 상태로 판정하지 않았습니다. 개수: {value.get('count', '알 수 없음')}. [{eid}]"
     else:
-        text = f"{service}: {value.get('state', 'unknown')} · health {health_status(value)}. [{eid}]"
-        if health_status(value) == "unknown": text += " 빈 health 값만으로 healthcheck 설정 여부나 정상 여부를 판단하지 않습니다."
+        lifecycle = value.get('state', 'unknown')
+        label = {"exited": "현재 중지 상태", "running": "현재 실행 중", "created": "생성됐지만 아직 실행하지 않은 상태", "restarting": "재시작 중", "paused": "일시 정지 상태"}.get(lifecycle, "실행 상태 미확인")
+        text = f"{service}: {label} ({lifecycle}). [{eid}]"
+        health = health_status(value)
+        if health == "unknown": text += " health 정보는 확인되지 않았습니다. 빈 값만으로 healthcheck 미설정이나 앱의 정상 여부를 단정하지 않습니다."
+        elif health == "not_configured": text += " healthcheck가 설정되지 않아 앱의 정상 여부는 확인하지 않았습니다."
+        else: text += f" Docker health: {health}."
     return {"final": text, "subject_status": subject, "answer_status": "validated" if complete else "unavailable",
             "execution_status": "completed" if complete else "failed", "lifecycle": value.get("state"), "health": health_status(value) if subject == "present" else "unknown",
             "validation_ok": complete, "validation_attempts": 0, "evidence_sufficient": complete, "evidence_coverage": 1.0 if complete else 0.0,

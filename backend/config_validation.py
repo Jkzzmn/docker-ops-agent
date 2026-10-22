@@ -5,6 +5,8 @@ validated claim. Snapshots refer to the original file hash, not masked text hash
 """
 import re
 from pathlib import PurePosixPath
+from .sanitize import redact
+from .diagnostics import contains_dangerous
 
 
 def snapshots(evidence):
@@ -34,6 +36,25 @@ def instructions(file):
         if match: result.append((match[1].upper(), match[2], start, number))
         pending = ""
     return None if pending else result
+
+
+def dependency_order_notes(files):
+    notes = []
+    for f in files:
+        if not f["complete"] or not f["found"] or f["redacted"] or not PurePosixPath(f["path"]).name.startswith("Dockerfile"): continue
+        rows = instructions(f)
+        if rows is None: continue
+        copies = []
+        for index, (kind, command, start, end) in enumerate(rows):
+            if kind == "FROM": copies = []
+            if kind == "COPY": copies.append(command)
+            if kind != "RUN" or not re.search(r"\bpip(?:3)?\s+install\b", command) or not copies: continue
+            later = next((r for r in rows[index+1:] if r[0] in {"FROM", "COPY"}), None)
+            manifest = r"(?:requirements[^\s/]*\.txt|pyproject\.toml|poetry\.lock|uv\.lock|setup\.cfg)(?:\s|$)"
+            if later and later[0] == "COPY" and all(re.match(manifest,re.sub(r"^(?:--\S+\s+)*", "", c)) for c in copies):
+                notes.append({"path":f["path"], "line_start":start, "line_end":later[3], "evidence_ids":[f["evidence_id"]],
+                    "text":f"pip 설치 단계({start}줄)는 의존성 파일 COPY 뒤, 나머지 파일 COPY({later[2]}줄) 앞에 이미 분리되어 있습니다. 이 순서 자체를 뒤집으라는 개선 제안은 하지 않습니다. 실제 캐시 적중·빌드 속도는 측정하지 않았습니다."})
+    return notes
 
 
 def inspect_rules(files):
@@ -96,3 +117,32 @@ def validate_review(evidence, review):
     return {"claims": supported, "candidates": decisions, "snapshots": files, "edits": edits, "unsupported_files": unsupported,
             "supported_count": len(supported), "contradicted_count": sum(x["verdict"] == "contradicted" for x in decisions),
             "insufficient_count": sum(x["verdict"] == "insufficient" for x in decisions)}
+
+
+def grounded_suggestions(validation, review):
+    """Exact source anchoring is necessary, not sufficient: an independent model must still judge meaning."""
+    result = []
+    for index, candidate in enumerate(review.get("findings", [])):
+        if index >= len(validation["candidates"]) or validation["candidates"][index]["verdict"] != "insufficient": continue
+        # Observed facts are rendered by executable checks and code-order notes.
+        # Free-form "fact" prose can smuggle unmeasured performance guarantees.
+        if candidate.get("claim_kind") == "fact": continue
+        text, snippet = candidate.get("text"), candidate.get("snippet")
+        if not isinstance(text, str) or not 8 <= len(text) <= 400 or not isinstance(snippet, str) or not 8 <= len(snippet) <= 300: continue
+        if contains_dangerous(text) or redact(text, 1000) != text or "[REDACTED]" in text or "[REDACTED]" in snippet: continue
+        # A second model can repeat the same semantic mistake. COPY --chown
+        # alone does not prove extra recursive ownership layers/performance cost.
+        # Such hypotheses need more evidence than this COPY-only source span.
+        if candidate.get("claim_kind") != "fact" and "--chown" in snippet:
+            parsed = instructions({"snippet": snippet})
+            if parsed and all(row[0] == "COPY" for row in parsed): continue
+        file = next((f for f in validation["snapshots"] if f["path"] == candidate.get("path") and f["complete"] and f["found"] and not f["redacted"]), None)
+        if not file or file["evidence_id"] not in candidate.get("evidence_ids", []): continue
+        if file["snippet"].count(snippet) != 1: continue
+        start = file["snippet"].index(snippet)
+        line = file["snippet"].count("\n", 0, start) + 1
+        result.append({"id": f"A{index+1}", "candidate_index": index, "path": file["path"], "line_start": line,
+                       "line_end": line + snippet.count("\n"), "snippet": snippet, "text": text,
+                       "claim_kind": "fact" if candidate.get("claim_kind") == "fact" else "static_risk",
+                       "evidence_ids": [file["evidence_id"]], "sha256": file["sha256"]})
+    return result[:3]

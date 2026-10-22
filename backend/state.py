@@ -6,6 +6,10 @@ class AgentState(TypedDict, total=False):
     thread_id: str
     history: list[dict[str, str]]
     route: str
+    runtime_operation: str
+    inventory_topics: list[str]
+    inventory_source: str
+    result_kind: str
     route_reason: str
     route_method: str
     route_fallback: bool

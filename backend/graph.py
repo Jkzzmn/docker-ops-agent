@@ -22,6 +22,9 @@ from .observations import status_answer, health_status
 from .network_diagnosis import diagnose_network
 from .config import Settings
 from .execution_policy import CURRENT_BUDGET, facts_only
+from .runtime_actions import propose_runtime_action
+from .inventory import observe_inventory
+from .port_owners import observe_port_owners
 
 
 from .state import AgentState, fresh_state
@@ -49,6 +52,15 @@ def build_graph(deps: Dependencies, *, checkpointer=None):
     validator = build_validator_agent(deps.llm)
     knowledge_agent = build_knowledge_agent()
     configuration_agent = build_config_agent(deps)
+
+    async def runtime_action(state: AgentState) -> dict:
+        return await propose_runtime_action(deps, state)
+
+    async def inventory_observe(state: AgentState) -> dict:
+        return await observe_inventory(deps, state)
+
+    async def port_diagnose(state: AgentState) -> dict:
+        return await observe_port_owners(deps, state)
 
     async def configuration(state: AgentState) -> dict:
         result = await configuration_agent.ainvoke(dict(state))
@@ -300,7 +312,8 @@ def build_graph(deps: Dependencies, *, checkpointer=None):
         budget = CURRENT_BUDGET.get()
         if budget and budget.reason: return "facts_finish"
         if (state.get("command") or {}).get("prompt") == "diagnose_network": return "network_diagnose"
-        return {"target_selection": "target_selection", "status": "status_observe", "clarify": "human_question", "unavailable": "routing_unavailable", "blocked": "policy_block", "chat": "chat_answer", "education": "education_retrieve", "configuration": "configuration", "change": "configuration"}.get(state["route"], "plan")
+        if state["route"] == "inventory" and "port_owners" in state.get("inventory_topics", []): return "port_diagnose"
+        return {"target_selection": "target_selection", "status": "status_observe", "inventory": "inventory_observe", "clarify": "human_question", "unavailable": "routing_unavailable", "blocked": "policy_block", "chat": "chat_answer", "education": "education_retrieve", "configuration": "configuration", "change": "configuration", "runtime": "runtime_action"}.get(state["route"], "plan")
 
     def after_review(state):
         return {"collect": "gate", "analysis": "analysis", "write": "write", "facts": "facts_finish", "done": END}[state["next_step"]]
@@ -309,6 +322,12 @@ def build_graph(deps: Dependencies, *, checkpointer=None):
         return "finalize" if state.get("validation_ok") or state.get("validation_attempts", 0) >= Settings().max_validation_attempts else "write"
 
     graph = StateGraph(AgentState)
+    graph.add_node("port_diagnose", traced_node(port_diagnose, scope="supervisor", node="port_diagnose", agent="supervisor"))
+    graph.add_edge("port_diagnose", END)
+    graph.add_node("inventory_observe", traced_node(inventory_observe, scope="supervisor", node="inventory_observe", agent="supervisor"))
+    graph.add_edge("inventory_observe", END)
+    graph.add_node("runtime_action", traced_node(runtime_action, scope="supervisor", node="runtime_action", agent="supervisor"))
+    graph.add_edge("runtime_action", END)
     graph.add_node("facts_finish", traced_node(facts_finish, scope="supervisor", node="facts_finish", agent="supervisor"))
     graph.add_edge("facts_finish", END)
     graph.add_node("network_diagnose", traced_node(network_diagnose, scope="supervisor", node="network_diagnose", agent="network"))
@@ -319,7 +338,7 @@ def build_graph(deps: Dependencies, *, checkpointer=None):
                      ("research", research), ("replan_check", replan_check), ("analysis", analysis), ("write", write), ("validate", validate), ("finalize", finalize)):
         graph.add_node(name, traced_node(fn, scope="supervisor", node=name, agent="supervisor"))
     graph.add_edge(START, "route")
-    graph.add_conditional_edges("route", after_route, {n: n for n in ("facts_finish", "network_diagnose", "target_selection", "status_observe", "human_question", "routing_unavailable", "policy_block", "chat_answer", "education_retrieve", "plan", "configuration")})
+    graph.add_conditional_edges("route", after_route, {n: n for n in ("port_diagnose", "facts_finish", "network_diagnose", "target_selection", "status_observe", "inventory_observe", "human_question", "routing_unavailable", "policy_block", "chat_answer", "education_retrieve", "plan", "configuration", "runtime_action")})
     graph.add_edge("target_selection", END); graph.add_edge("status_observe", END)
     graph.add_edge("human_question", END)
     graph.add_edge("routing_unavailable", END)

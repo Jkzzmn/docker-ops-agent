@@ -13,6 +13,7 @@ __pycache__/
 data/
 eval/results/
 docs/screenshots/
+docs/demo-image-details-ui.png
 *.log
 .DS_Store
 eval/latest_results.json

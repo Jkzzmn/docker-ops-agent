@@ -46,21 +46,27 @@ def test_router_project_provenance_failure_escalates_to_fast_without_rule_route(
         async def _ask_impl(self, *args, **kwargs):
             _, role = select_model(self.s, kwargs.get("quality", False))
             self.seen.append(role)
-            return json.dumps({"route":"status", "reason":"service state", "needs_context":False, "clarification":None,
+            if "route" in kwargs["schema"].get("properties", {}):
+                return json.dumps({"route":"lookup", "reason":"service state", "needs_context":False, "clarification":None,
+                                  "inventory_topics":["status"], "declarations_only":False, "operation":None, "action_quote":None})
+            return json.dumps({
                 "project_reference":"explicit" if role == "router" else "current", "requested_project":"bizxray" if role == "router" else None,
-                "target_scope":"service", "target_cardinality":"one", "service":"ai", "lesson_ids":[], "education_topic":"unknown", "known_lifecycle":"unknown", "lifecycle_quote":None})
+                "target_scope":"service", "service":"ai"})
     gateway = Gateway(Settings(router_model="tiny")); gateway.seen = []
     value = asyncio.run(classify_request(gateway, "ai 상태", [], allowed_services=("ai",), selected_target={"project":"bizxray"}))
-    assert value["route"] == "status" and gateway.seen == ["router", "fast"]
+    assert value["route"] == "status" and gateway.seen == ["quality", "router", "fast"]
 
 
 def test_default_fast_router_still_uses_existing_project_safety_guard():
     from backend.routing import classify_request
     class Gateway(ModelGateway):
         async def _ask_impl(self, *args, **kwargs):
-            if kwargs.get("quality"): return '{"project_reference":"explicit","requested_project":"ai"}'
-            return json.dumps({"route":"status", "reason":"explicit other project", "needs_context":False, "clarification":None,
-                "project_reference":"explicit", "requested_project":"ai", "target_scope":"service", "target_cardinality":"one", "service":"ai", "lesson_ids":[], "education_topic":"unknown", "known_lifecycle":"unknown", "lifecycle_quote":None})
+            if kwargs.get("quality") and "route" not in kwargs["schema"].get("properties", {}): return '{"project_reference":"explicit","requested_project":"ai"}'
+            if "route" in kwargs["schema"].get("properties", {}):
+                return json.dumps({"route":"lookup", "reason":"explicit other project", "needs_context":False, "clarification":None,
+                                  "inventory_topics":["status"], "declarations_only":False, "operation":None, "action_quote":None})
+            return json.dumps({
+                "project_reference":"explicit", "requested_project":"ai", "target_scope":"service", "service":"ai"})
     gateway = Gateway(Settings(router_model=""))
     value = asyncio.run(classify_request(gateway, "bizxray 말고 ai 프로젝트 상태", [], allowed_services=("ai",), selected_target={"project":"bizxray"}))
     assert value["route"] == "target_selection"

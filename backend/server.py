@@ -146,7 +146,7 @@ def _meta(final: dict, b: dict) -> dict[str, Any]:
     errors = [e for e in events if e["type"] == "ModelError"]
     answer_status = final.get("answer_status") or ("partial" if final.get("validation_ok") is True and final.get("evidence_sufficient") is False else "validated" if final.get("validation_ok") is True else "partial" if final.get("validation_ok") is False else "unavailable" if route in {"unavailable", "target_selection"} or errors else "unverified")
     return {"schema_version": "2.5", "conversation_memory": {"backend": "sqlite", "thread_id": final.get("thread_id"), "history_messages": len(final.get("history", []))}, "execution_status": final.get("execution_status") or ("waiting_for_user" if final.get("clarification") or final.get("target_selection_required") else "failed" if route == "unavailable" else "completed"), "answer_status": answer_status,
-            "lifecycle": final.get("lifecycle"), "health": final.get("health", "unknown"), "route_file_intent_check": final.get("route_file_intent_check"),
+            "lifecycle": final.get("lifecycle"), "health": final.get("health", "unknown"), "route_file_intent_check": final.get("route_file_intent_check"), "runtime_operation": final.get("runtime_operation"), "inventory_topics": final.get("inventory_topics"), "inventory_source": final.get("inventory_source"), "result_kind": final.get("result_kind"),
             "subject_status": final.get("subject_status", "unknown"), "target_selection_required": final.get("target_selection_required", False), "requested_project": final.get("requested_project"), "config_metrics": final.get("config_metrics"),
             "lesson_selection": final.get("lesson_selection"), "route_method": final.get("route_method"), "route_context_used": final.get("route_context_used", False), "route_fallback": final.get("route_fallback", False), "docker_target": b["target"], "knowledge_count": len(final.get("knowledge", [])), "knowledge_ids": [item["id"] for item in final.get("knowledge", [])], "retrieval_method": next((x.get("retrieval_method") for x in final.get("knowledge", [])), "llm-catalog" if final.get("semantic_lesson_ids") is not None else "keyword-top3") if route == "education" else None,
             "route": final.get("route"), "route_reason": final.get("route_reason"), "waiting_for_user": bool(final.get("clarification")), "clarification_rounds": final.get("clarification_rounds", 0), "command": (final.get("command") or {}).get("name"), "task_count": len(final.get("tasks", [])), "replan_rounds": final.get("replan_rounds", 0), "retry_count": final.get("retry_count", 0), "parallel_elapsed": round(final.get("parallel_elapsed", 0.0), 4),
@@ -154,7 +154,7 @@ def _meta(final: dict, b: dict) -> dict[str, Any]:
             "validation_attempts": final.get("validation_attempts", 0), "validation_ok": final.get("validation_ok"), "evidence_count": len(final.get("evidence", [])), "evidence_coverage": final.get("evidence_coverage"), "evidence_sufficient": final.get("evidence_sufficient"), "root_cause": final.get("diagnosis", {}).get("cause"),
             "tool_calls": ((usage.CURRENT_USAGE.get() or {}).get("execution_budget") or {}).get("tool_calls", sum(e.get("retries", 0) + 1 for e in events if e["type"] in {"TaskCompleted", "TaskFailed"})), "mutation_calls": 0, "policy_blocked": final.get("unsafe_request", False), "analysis_policy": final.get("analysis_policy"), "analysis_used": final.get("analysis_used", False), "analysis_reason": final.get("analysis_reason"),
             "agents_run": sorted({e["agent"] for e in events if e["type"] == "AgentStarted"}), "worker_reports": final.get("worker_reports", []), "confidence": final.get("confidence"), "proposal_created": bool(final.get("proposal")),
-            "llm_backend": b["settings"].backend, "fast_model": fast, "quality_model": quality, "router_model": (b["settings"].openai_router_model if b["settings"].backend == "openai" else b["settings"].router_model) or fast,
+            "llm_backend": b["settings"].backend, "fast_model": fast, "quality_model": quality, "intent_model": quality, "router_model": (b["settings"].openai_router_model if b["settings"].backend == "openai" else b["settings"].router_model) or fast,
             "llm_usage": usage.summarize(usage.CURRENT_USAGE.get()), "execution_budget": (usage.CURRENT_USAGE.get() or {}).get("execution_budget"), "router_escalations": (usage.CURRENT_USAGE.get() or {}).get("router_escalations", 0),
             "supervisor_version": b["deps"].version, "instance_id": b["instance_id"], "langsmith_run_id": (usage.CURRENT_USAGE.get() or {}).get("langsmith_run_id"), "langsmith_status": (usage.CURRENT_USAGE.get() or {}).get("langsmith_status")}
 
@@ -337,6 +337,15 @@ async def _approve(action_id: str):
     mutation_started = False
     wait = b["settings"].recovery_wait_seconds
     try:
+        if action.tool == "execute_runtime_action":
+            token = sign_approval(b["mcp"].approval_secret, action.id, action.tool, action.args, action.expires_at)
+            mutation_started = True
+            result, retries = await b["mcp"].tool(action.tool, action.args | {"approval_token": token}, attempts=1)
+            payload = {"type": "RuntimeAction", "action_id": action.id, "status": "executed" if result.get("ok") else "failed",
+                       "result": result, "retries": retries, "mutation_calls": int(result.get("mutation_started", False))}
+            b["approvals"].finish(action.id, payload["status"], payload)
+            b["metrics"]["approvals_executed"] += 1
+            return payload
         if action.tool in {"apply_project_config_patch", "deploy_project_config"}:
             token = sign_approval(b["mcp"].approval_secret, action.id, action.tool, action.args, action.expires_at)
             mutation_started = True

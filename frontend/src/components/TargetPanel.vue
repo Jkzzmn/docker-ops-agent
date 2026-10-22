@@ -46,7 +46,7 @@ watch(() => props.identity, () => { if (!busy.value) refresh() })
 
 <template>
   <details class="target-picker" :open="!selected">
-    <summary>프로젝트 선택 · Docker 컨테이너 보기</summary>
+    <summary><span>프로젝트·컨테이너 관리</span><span class="picker-summary">{{ selected ? '대상 확인 또는 변경' : '진단할 프로젝트를 선택해주세요' }}</span></summary>
     <div class="body">
       <p>백엔드 서버의 Docker 엔진을 조회합니다. 실행·중지 컨테이너를 모두 표시하며, 선택만으로 시작하거나 파일을 수정하지 않습니다.</p>
       <button type="button" class="btn" :disabled="busy || disabled" @click="refresh">Docker 목록 새로고침</button>
@@ -97,8 +97,13 @@ watch(() => props.identity, () => { if (!busy.value) refresh() })
 </template>
 
 <style scoped>
-.target-picker { margin-bottom: 24px; border: 1px solid var(--line-strong); border-radius: 12px; font-size: 14px; }
+.target-picker { margin-bottom: 24px; border: 1px solid var(--line); border-radius: 14px; font-size: 14px; background: var(--white); }
+.target-picker > summary { display: flex; align-items: center; justify-content: space-between; gap: 12px; list-style: none; padding: 16px 18px; }
+.target-picker > summary::-webkit-details-marker { display: none; }
+.target-picker > summary::after { content: '+'; color: var(--ink-3); font-size: 18px; }
+.target-picker[open] > summary::after { content: '−'; }
 summary { cursor: pointer; padding: 14px; font-weight: 650; }
+.picker-summary { margin-left: auto; font-size: 12px; font-weight: 400; color: var(--ink-3); }
 .body { padding: 0 16px 16px; display: grid; gap: 14px; line-height: 1.6; }
 form { display: flex; gap: 10px; align-items: end; flex-wrap: wrap; }
 label { flex: 1; min-width: 180px; }
@@ -111,4 +116,5 @@ table { width: 100%; border-collapse: collapse; text-align: left; font-size: 13p
 th, td { padding: 9px; border-bottom: 1px solid var(--line); overflow-wrap: anywhere; }
 .error { color: var(--orange-700); }
 .current { overflow-wrap: anywhere; }
+@media (max-width: 480px) { .picker-summary { display: none; } label { min-width: 0; flex-basis: 100%; } .body { padding: 0 14px 14px; } }
 </style>
