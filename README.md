@@ -2,8 +2,6 @@
 
 자연어로 Docker 상태와 Compose/Dockerfile을 점검하는 교육·진단 미니프로젝트입니다. FastAPI, LangGraph, MCP, Ollama/OpenAI, Vue를 사용합니다. 필요한 경로만 실행하며 화면에는 실제로 시작한 노드만 표시합니다.
 
-2026-10-22 업데이트: [시연 질문 10개 실제 실행·수정 결과](docs/DEMO_QUESTIONS_VERIFICATION_20261022.md), [현재 구성 조회](docs/CONFIGURATION_LOOKUP_FIX.md), [실행 요청·파일 검토 분리](docs/INTENT_FULFILLMENT_FIX.md), [UI/UX 개선](docs/UI_UX_IMPROVEMENTS.md). 현재 값 조회를 교육·최적화 검토와 분리하고, 명시된 서비스 대신 다른 서비스를 조회하지 않도록 인자를 검증합니다. 아래 PDF는 이전 구조의 기록이며 최신 inventory/runtime_action/port_diagnose 분기는 위 문서를 우선하세요.
-
 ![LangGraph 전체 흐름](output/pdf/current_langgraph-1.png)
 
 ## 구조와 설명
